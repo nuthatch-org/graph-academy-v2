@@ -8,6 +8,10 @@ on:
     # nightly freshness sweep
     - cron: '17 5 * * *'
 
+env:
+  # The commands CI runs live in yatr.toml, so `yatr <task>` locally is the same gate.
+  YATR_VERSION: "1.2.0"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,19 +21,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Registry integrity and parameter usage
-        run: npm run params
-      - name: Build
-        run: npm run build
-      - name: Internal links
-        run: node scripts/check-links.mjs
-      - name: Design system audit
-        run: npm run audit:style
-      - name: graph-support citations still exist
+      - name: Cache yatr
+        id: cache-yatr
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/yatr
+          key: yatr-${{ runner.os }}-${{ env.YATR_VERSION }}
+      - name: Install yatr
+        if: steps.cache-yatr.outputs.cache-hit != 'true'
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        env:
+          RUSTFLAGS: ""
+      - name: Params, build, internal links, design system audit, citations
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/check-support-links.mjs
+        run: yatr ci
 
   lighthouse:
     # Runs against a local preview of the real build. Blocking on accessibility
@@ -42,14 +48,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run build
+      - name: Cache yatr
+        id: cache-yatr
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/yatr
+          key: yatr-${{ runner.os }}-${{ env.YATR_VERSION }}
+      - name: Install yatr
+        if: steps.cache-yatr.outputs.cache-hit != 'true'
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        env:
+          RUSTFLAGS: ""
       - name: Serve and audit
-        run: |
-          npx astro preview --port 4321 &
-          npx wait-on http://localhost:4321/ --timeout 60000
-          node scripts/lighthouse-check.mjs
-          node scripts/mobile-check.mjs
+        run: yatr browser
 
   contrast:
     # Blocking. An accessibility regression is not a matter of taste.
@@ -59,7 +70,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python3 tools/contrast.py
+      - name: Cache yatr
+        id: cache-yatr
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/yatr
+          key: yatr-${{ runner.os }}-${{ env.YATR_VERSION }}
+      - name: Install yatr
+        if: steps.cache-yatr.outputs.cache-hit != 'true'
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        env:
+          RUSTFLAGS: ""
+      - run: yatr contrast
 
   staleness:
     # Non-blocking on a pull request, so a contributor is not punished for
@@ -72,14 +94,22 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Cache yatr
+        id: cache-yatr
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/yatr
+          key: yatr-${{ runner.os }}-${{ env.YATR_VERSION }}
+      - name: Install yatr
+        if: steps.cache-yatr.outputs.cache-hit != 'true'
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        env:
+          RUSTFLAGS: ""
       - name: Freshness report
-        run: node scripts/staleness.mjs ${{ github.event_name == 'schedule' && '--strict' || '' }}
+        run: yatr ${{ github.event_name == 'schedule' && 'staleness-strict' || 'staleness' }}
       - name: Outbound links
         if: github.event_name == 'schedule'
-        run: |
-          npm run build
-          node scripts/check-links.mjs --external
+        run: yatr links-external
 
   chain:
     # Reads the deployed contracts on Arbitrum One over a public RPC and
@@ -93,9 +123,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Cache yatr
+        id: cache-yatr
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/yatr
+          key: yatr-${{ runner.os }}-${{ env.YATR_VERSION }}
+      - name: Install yatr
+        if: steps.cache-yatr.outputs.cache-hit != 'true'
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        env:
+          RUSTFLAGS: ""
       - name: Reconcile against Arbitrum One
-        run: node scripts/reconcile-rpc.mjs
+        run: yatr chain
 
   reconcile:
     # Reads the network subgraph for the values a contract call cannot give,
@@ -110,10 +150,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Cache yatr
+        id: cache-yatr
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/yatr
+          key: yatr-${{ runner.os }}-${{ env.YATR_VERSION }}
+      - name: Install yatr
+        if: steps.cache-yatr.outputs.cache-hit != 'true'
+        run: cargo install yatr --version ${{ env.YATR_VERSION }} --locked
+        env:
+          RUSTFLAGS: ""
       - name: Reconcile against chain
         env:
           GRAPH_API_KEY: ${{ secrets.GRAPH_API_KEY }}
           NETWORK_SUBGRAPH_URL: ${{ secrets.NETWORK_SUBGRAPH_URL }}
           NETWORK_SUBGRAPH_QUERY: ${{ secrets.NETWORK_SUBGRAPH_QUERY }}
-        run: node scripts/reconcile-onchain.mjs
+        run: yatr reconcile
