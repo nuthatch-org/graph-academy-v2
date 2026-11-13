@@ -1,0 +1,131 @@
+# yatr - https://github.com/cargopete/yatr
+#
+# The package.json scripts and the CI jobs, by name. Vercel builds and deploys; nothing here ships.
+
+# CI's node-version: 22.
+[toolchain.node]
+version = "22.23.5"
+url = "https://nodejs.org/dist/v{version}/node-v{version}-{os}-{arch}.tar.gz"
+bin = "node-v{version}-{os}-{arch}/bin"
+
+[env]
+ASTRO_TELEMETRY_DISABLED = "1"
+
+[settings]
+cache = true
+
+# Not cached: node_modules is gitignored, so yatr cannot see whether it exists.
+[tasks.install]
+desc = "Install dependencies from the lockfile"
+run = ["npm ci --no-audit --no-fund"]
+no_cache = true
+
+[tasks.params]
+desc = "Registry integrity, parameter usage, hard-coded literals"
+depends = ["install"]
+run = ["node scripts/check-params.mjs"]
+sources = ["data/**", "src/**", "scripts/**"]
+
+[tasks.knowledge]
+desc = "Rebuild api/_knowledge.json for the chat endpoint"
+depends = ["install"]
+run = ["node scripts/build-knowledge.mjs"]
+sources = ["src/**", "data/**", "scripts/build-knowledge.mjs", "scripts/lib.mjs"]
+outputs = ["api/_knowledge.json"]
+
+[tasks.build]
+desc = "The site and its Pagefind index into dist/"
+depends = ["knowledge"]
+run = ["npx astro build"]
+sources = ["src/**", "public/**", "data/**", "astro.config.mjs", "tsconfig.json", "package-lock.json"]
+outputs = ["dist/**"]
+
+[tasks.links]
+desc = "Every internal link and anchor in dist/"
+depends = ["build"]
+run = ["node scripts/check-links.mjs"]
+sources = ["scripts/check-links.mjs", "scripts/lib.mjs"]
+
+[tasks.links-external]
+desc = "Outbound links too (network)"
+depends = ["build"]
+run = ["node scripts/check-links.mjs --external"]
+no_cache = true
+
+[tasks.style-audit]
+desc = "Design system conformance, source and built output"
+depends = ["build"]
+run = ["node scripts/style-audit.mjs"]
+sources = ["src/**", "public/**", "scripts/style-audit.mjs", "scripts/lib.mjs"]
+
+[tasks.contrast]
+desc = "Colour contrast in both themes"
+run = ["python3 tools/contrast.py"]
+sources = ["src/**", "tools/contrast.py"]
+
+[tasks.typecheck]
+desc = "astro check"
+depends = ["install"]
+run = ["npx astro check"]
+sources = ["src/**", "astro.config.mjs", "tsconfig.json", "package-lock.json"]
+
+# Each is dated against today or reads live state, so none is cached.
+[tasks.staleness]
+desc = "Pages past their check date, parameters unread for ninety days"
+depends = ["install"]
+run = ["node scripts/staleness.mjs"]
+no_cache = true
+
+[tasks.staleness-strict]
+desc = "Staleness, failing on card drift too (the nightly run)"
+depends = ["install"]
+run = ["node scripts/staleness.mjs --strict"]
+no_cache = true
+
+[tasks.chain]
+desc = "Reconcile the registry against Arbitrum One over a public RPC"
+depends = ["install"]
+run = ["node scripts/reconcile-rpc.mjs"]
+no_cache = true
+
+[tasks.citations]
+desc = "graph-support citations still exist (GITHUB_TOKEN helps with rate limits)"
+depends = ["install"]
+run = ["node scripts/check-support-links.mjs"]
+no_cache = true
+
+[tasks.reconcile]
+desc = "Reconcile against the network subgraph (needs GRAPH_API_KEY)"
+depends = ["install"]
+run = ["node scripts/reconcile-onchain.mjs"]
+no_cache = true
+
+# check-all serves dist/ itself for these two.
+[tasks.browser]
+desc = "Lighthouse and mobile checks against a local preview (needs a Chromium)"
+depends = ["build"]
+run = ["node scripts/check-all.mjs lighthouse mobile"]
+no_cache = true
+
+[tasks.og]
+desc = "Render public/og.png from tools/og/card.html (needs a Chromium)"
+run = ["node scripts/make-og.mjs"]
+no_cache = true
+
+[tasks.dev]
+desc = "Astro dev server on :4321"
+depends = ["install"]
+foreground = true
+run = ["npx astro dev"]
+
+[tasks.preview]
+desc = "Serve dist/"
+depends = ["build"]
+foreground = true
+run = ["npx astro preview"]
+
+# The CI build job; lighthouse, contrast, staleness and chain are their own jobs.
+[tasks.ci]
+desc = "params, build, links, style-audit, citations"
+depends = ["params", "build", "links", "style-audit", "citations"]
+run = []
